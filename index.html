@@ -257,8 +257,12 @@ label.f>span{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing
 }
 .tv-now{display:flex;flex-direction:column;gap:6px;flex:1;justify-content:center;min-height:0}
 .tv-lbl{font-family:"IBM Plex Mono",monospace;font-size:clamp(10px,1.3vw,14px);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
-.tv-sec{font-family:Archivo;font-weight:700;font-size:clamp(26px,5.4vw,64px);line-height:1.02}
-.tv-next{display:flex;gap:10px;align-items:baseline;color:var(--ink-2);font-size:clamp(14px,2vw,22px)}
+.tv-sec{font-family:Archivo;font-weight:700;font-size:clamp(34px,7.2vw,104px);line-height:1.02}
+.tv-next{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;color:var(--ink-2);font-size:clamp(22px,3.6vw,48px);line-height:1.1}
+.tv-next b{font-family:Archivo;font-weight:700;color:var(--ink)}
+.tv-next .tv-lbl{font-size:clamp(12px,1.6vw,20px)}
+/* título de la sección actual en escenario y púlpito: antes era una etiqueta chiquita */
+.tv-cur{font-family:Archivo;font-weight:700;font-size:clamp(30px,6.4vw,92px);line-height:1.04;color:var(--ink)}
 .tv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
 .tv-cell{background:var(--surface);padding:11px 14px 13px;display:flex;flex-direction:column;gap:3px}
 .tv-cell .cv{font-family:"IBM Plex Mono",monospace;font-size:clamp(17px,2.4vw,26px);font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
@@ -606,7 +610,14 @@ const $  = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const uid = (n=6)=>{const a="abcdefghijkmnpqrstuvwxyz23456789";let s="";for(let i=0;i<n;i++)s+=a[Math.floor(Math.random()*a.length)];return s};
-const area = id => CFG.areas.find(a=>a.id===id) || {id:id,nombre:(id||"—").toUpperCase(),color:"#888"};
+// Escenario y púlpito no son áreas de personas: son pantallas. Se les puede escribir
+// desde el chat (solo el productor), y son las ÚNICAS que les hacen flash.
+const DESTINOS_SALA = [
+  { id:"escenario", nombre:"ESCENARIO", color:"#E5AC44" },
+  { id:"pulpito",   nombre:"PÚLPITO",   color:"#E8705B" }
+];
+const area = id => CFG.areas.find(a=>a.id===id) || DESTINOS_SALA.find(a=>a.id===id)
+                   || {id:id,nombre:(id||"—").toUpperCase(),color:"#888"};
 
 function fmtDur(ms, signo){
   const neg = ms < 0; let s = Math.floor(Math.abs(ms)/1000);
@@ -1009,16 +1020,27 @@ function ruta(){
    ========================================================================== */
 let flashTimer=null;
 function detectarFlash(antes, r){
-  const vistasConFlash = ["prod","consola","area","cabina","escenario","live"];
-  if(!vistasConFlash.includes(S.vista)) return;   // el púlpito nunca ve el chat
+  const vistasConFlash = ["prod","consola","area","cabina","escenario","pulpito","live"];
+  if(!vistasConFlash.includes(S.vista)) return;
   const msgs = Object.entries(r.chat||{}).map(([k,v])=>({id:k,...v})).sort((a,b)=>(a.en||0)-(b.en||0));
   if(!msgs.length) return;
   const nuevo = msgs[msgs.length-1];
   if((nuevo.en||0) <= S.ultimoChat) return;
   S.ultimoChat = nuevo.en||0;
   if(nuevo.deId && nuevo.deId===sesionId()) return;          // no me flasheo a mí mismo
-  const miArea = S.yo ? S.yo.areaId : null;                  // las pantallas de sala no tienen área
-  const paraMi = !nuevo.para || nuevo.para==="todos" || (miArea && nuevo.para===miArea);
+  const para = nuevo.para || "todos";
+  let paraMi;
+  if(S.vista==="escenario" || S.vista==="pulpito"){
+    // escenario y púlpito: solo si el mensaje es para ellos. Un "Todos" no los distrae.
+    paraMi = para===S.vista;
+  } else if(S.vista==="cabina"){
+    // la TV de cabina es de todos: solo los mensajes a Todos, aunque el navegador tenga un nombre guardado
+    paraMi = para==="todos";
+  } else {
+    // el resto: lo que va a Todos, o lo que va a MI área. Un mensaje a Sonido no flashea en Video.
+    const miArea = S.yo ? S.yo.areaId : null;   // la TV de cabina no tiene área: solo recibe los de Todos
+    paraMi = para==="todos" || (miArea && para===miArea);
+  }
   if(!paraMi) return;
   lanzarFlash(nuevo);
 }
@@ -1090,6 +1112,13 @@ A.reabrir = () => {
   Store.patch(r.sala, {estado:"en_vivo", cerradaEn:null, secActiva: Math.max(0,(r.secciones||[]).length-1)});
 };
 
+// A quién va un mensaje según el canal abierto. Si un voluntario escribe en el canal
+// de su propia área, le está hablando a producción (si no, se mandaría a sí mismo).
+function destinoDe(canal){
+  if(!canal || canal==="todos") return "todos";
+  if(S.yo && !esProductor() && canal===S.yo.areaId) return "produccion";
+  return canal;
+}
 A.enviar = (texto, para) => {
   const r=S.r; if(!r||!texto.trim()||!S.yo) return;
   Store.chat(r.sala, {
@@ -1284,7 +1313,8 @@ function cChat(r, opts={}){
   const sinLeer = c => todos.filter(m => enCanal(m,c) && (m.en||0) > (visto[c]||0) && m.deId!==sesionId()).length;
   marcarVisto(r.sala, canal, ahora());
 
-  const rail = [{id:"todos",nombre:"TODOS",color:"var(--ink-2)"}, ...CFG.areas].map(a=>{
+  const canalesSala = esProductor() ? DESTINOS_SALA : [];
+  const rail = [{id:"todos",nombre:"TODOS",color:"var(--ink-2)"}, ...CFG.areas, ...canalesSala].map(a=>{
     const n = a.id===canal ? 0 : sinLeer(a.id);
     return `<button class="ch ${a.id===canal?'on':''}" data-act="canal" data-c="${a.id}">
       <span class="dot" style="color:${a.color}"></span>
@@ -1306,12 +1336,12 @@ function cChat(r, opts={}){
     </div>`;
   }).join("") : '<div class="empty">Nada en este canal todavía.</div>';
 
-  const destino = canal==="todos" ? "todos" : canal;
+  const destino = destinoDe(canal);
   const rapidos = CFG.rapidos.map(t=>`<button class="btn sm" data-act="rapido" data-t="${esc(t)}">${esc(t)}</button>`).join("");
 
   return `<div class="card chat" style="max-height:${opts.alto||'420px'}">
     <div class="phase"><span>Chat</span>
-      <span class="pc">${canal==="todos"?"a todo el equipo":"a "+esc(area(canal).nombre)}</span></div>
+      <span class="pc">${destino==="todos"?"a todo el equipo":"a "+esc(area(destino).nombre)}</span></div>
     <div class="chat-body">
       <div class="chat-rail">${rail}</div>
       <div class="chat-main">
@@ -1320,7 +1350,7 @@ function cChat(r, opts={}){
           <div class="quick">${rapidos}</div>
           <div class="chat-in">
             <input class="inp" id="chatTxt" data-para="${destino}" maxlength="300" autocomplete="off" value="${esc(S.borrador||"")}"
-                   placeholder="${canal==="todos"?"A todos…":"A "+esc(area(canal).nombre)+"…"}">
+                   placeholder="${destino==="todos"?"A todos…":"A "+esc(area(destino).nombre)+"…"}">
             <button class="btn pri" data-act="enviar">↑</button>
           </div>`}
       </div>
@@ -1903,7 +1933,7 @@ function vLive(){
       <div class="stack">
         <div class="card" style="padding:16px">
           <div class="k">${r.estado==="en_vivo"?"En vivo":r.estado==="cerrada"?"Cerrada":"Antes de arrancar"}</div>
-          <div style="font-family:Archivo;font-weight:700;font-size:25px;margin:3px 0">${cur?esc(cur.titulo):esc(r.titulo)}</div>
+          <div style="font-family:Archivo;font-weight:700;font-size:clamp(26px,4vw,40px);line-height:1.1;margin:3px 0">${cur?esc(cur.titulo):esc(r.titulo)}</div>
           ${cur&&cur.arrancoEn?`<div class="mono" style="font-size:34px;font-weight:700" id="tk-live">${fmtDur(cur.min*60000-(ahora()-cur.arrancoEn))}</div>`:""}
           <div class="muted" style="font-size:14px;margin-top:6px">
             ${r.estado==="en_vivo"?`Desvío ${fmtDur(d,true)} · fin proyectado ${hhmm(finProyectado(r))}`:`Inicio ${r.hora} · ${fechaLarga(r.fecha)}`}
@@ -1961,6 +1991,16 @@ function vCabina(){
   </div>`;
 }
 
+// Último mensaje del chat dirigido a esta pantalla, visible 2 minutos.
+const MSG_PANTALLA_MS = 2*60000;
+function cMsgPantalla(r, destino){
+  const ms = Object.values(r.chat||{}).filter(m=>m.para===destino).sort((a,b)=>(b.en||0)-(a.en||0));
+  const m = ms[0];
+  if(!m || ahora() - (m.en||0) > MSG_PANTALLA_MS) return "";
+  return `<div class="tv-msg" data-hasta="${(m.en||0)+MSG_PANTALLA_MS}" style="background:var(--surface-2);border-color:${area(m.area).color};color:var(--ink)">
+    <div class="tv-lbl" style="margin-bottom:6px">${esc(m.nombre)} · ${hhmm(m.en)}</div>${esc(m.texto)}</div>`;
+}
+
 function vEscenario(){
   const r=S.r;
   if(!r) return '<div class="center"><div class="empty">'+(S.sala===CFG.alias?'Todavía no hay una reunión activa.':'Esta reunión no existe.')+'</div></div>';
@@ -1974,10 +2014,11 @@ function vEscenario(){
     <div class="tv-clock" style="text-align:center" id="tk-reloj2">${hhmm(ahora())}</div>
   </div>`;
   return `<div class="tv" style="justify-content:center;text-align:center">
-    <div class="tv-lbl">${cur?esc(cur.titulo):"Falta para arrancar"}</div>
-    <div class="big" id="tk-esc" style="font-size:clamp(76px,26vw,320px);color:${rest<0?'var(--late)':'var(--ink)'}">${fmtDur(rest)}</div>
-    ${next?`<div class="tv-next" style="justify-content:center"><span class="tv-lbl">Sigue</span><b style="font-size:clamp(18px,3.4vw,40px)">${esc(next.titulo)}</b></div>`:""}
+    ${cur?`<div class="tv-cur">${esc(cur.titulo)}</div>`:`<div class="tv-lbl">Falta para arrancar</div>`}
+    <div class="big" id="tk-esc" style="font-size:clamp(72px,22vw,280px);color:${rest<0?'var(--late)':'var(--ink)'}">${fmtDur(rest)}</div>
+    ${next?`<div class="tv-next" style="justify-content:center"><span class="tv-lbl">Sigue</span><b>${esc(next.titulo)}</b></div>`:""}
     ${r.avisoPulpito?`<div class="tv-msg">${esc(r.avisoPulpito.texto)}</div>`:""}
+    ${cMsgPantalla(r,"escenario")}
     <div class="tv-clock" style="text-align:center" id="tk-reloj2">${hhmm(ahora())}</div>
   </div>`;
 }
@@ -1999,13 +2040,14 @@ function vPulpito(){
   return `<div class="tv" style="justify-content:center;text-align:center;gap:clamp(14px,3vw,34px)">
     <div class="sem ${cerrada?'':nv}" style="height:clamp(14px,2.4vw,26px);${cerrada?'background:var(--line-2)':''}"></div>
     <div>
-      <div class="tv-lbl">${cerrada?"Reunión terminada":cur?esc(cur.titulo):"La reunión no arrancó"}</div>
-      <div class="big" id="tk-pul" style="font-size:clamp(80px,28vw,340px);color:var(--${cerrada?'ink-2':nv==='ok'?'ok':nv==='warn'?'warn':'late'})">
+      ${cur&&!cerrada?`<div class="tv-cur">${esc(cur.titulo)}</div>`:`<div class="tv-lbl">${cerrada?"Reunión terminada":"La reunión no arrancó"}</div>`}
+      <div class="big" id="tk-pul" style="font-size:clamp(76px,24vw,300px);color:var(--${cerrada?'ink-2':nv==='ok'?'ok':nv==='warn'?'warn':'late'})">
         ${cerrada||rest==null?"—":fmtDur(rest)}</div>
       <div class="tv-lbl">${cerrada?"":rest!=null&&rest<0?"te pasaste":"tiempo restante"}</div>
       ${faltaPred!=null?`<div class="tv-lbl" style="margin-top:10px;color:var(--ink-2)">tu bloque empieza en ~<span id="tk-pulpre">${Math.ceil(faltaPred/60000)}</span> min</div>`:""}
     </div>
     ${r.avisoPulpito?`<div class="tv-msg">${esc(r.avisoPulpito.texto)}</div>`:""}
+    ${cMsgPantalla(r,"pulpito")}
     <div class="tv-clock" style="text-align:center" id="tk-reloj3">${hhmm(ahora())}</div>
   </div>`;
 }
@@ -2109,6 +2151,7 @@ function tick(){
     const f = Math.max(0, (r.inicioMs||0)-ahora());
     ["tk-falta","tk-tvfalta","tk-esc","tk-cons"].forEach(id=>set(id, fmtDur(f)));
   }
+  document.querySelectorAll("[data-hasta]").forEach(el=>{ if(ahora() > +el.dataset.hasta) el.remove(); });
   const nd=document.getElementById("tk-nudge");
   if(nd) nd.hidden = !(r.estado==="preservicio" && ahora() > (r.inicioMs||0) + 60000);
   if(r.estado==="en_vivo"){
@@ -2247,10 +2290,10 @@ document.addEventListener("click", async ev => {
 
   // --- chat
   if(act==="canal"){ S.canal=b.dataset.c; render(); return; }
-  if(act==="rapido"){ A.enviar(b.dataset.t, S.canal||"todos"); return; }
+  if(act==="rapido"){ A.enviar(b.dataset.t, destinoDe(S.canal)); return; }
   if(act==="enviar"){
     const i=$("#chatTxt"); if(!i) return;
-    A.enviar(i.value, S.canal||"todos"); i.value=""; S.borrador="";
+    A.enviar(i.value, destinoDe(S.canal)); i.value=""; S.borrador="";
     return;
   }
 
@@ -2289,7 +2332,7 @@ document.addEventListener("input", ev=>{
 
 document.addEventListener("keydown", ev=>{
   if(ev.key==="Enter" && ev.target.id==="chatTxt"){
-    A.enviar(ev.target.value, S.canal||"todos"); ev.target.value=""; S.borrador=""; ev.preventDefault();
+    A.enviar(ev.target.value, destinoDe(S.canal)); ev.target.value=""; S.borrador=""; ev.preventDefault();
   }
   if(ev.key==="Enter" && ev.target.id==="inNombre"){ const b=document.querySelector('[data-act="entrar"]'); if(b) b.click(); }
 });
