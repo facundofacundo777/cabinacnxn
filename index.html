@@ -1063,30 +1063,30 @@ let flashTimer=null;
 function detectarFlash(antes, r){
   const vistasConFlash = ["prod","consola","area","cabina","escenario","pulpito","live","oido"];
   if(!vistasConFlash.includes(S.vista)) return;
-  const msgs = Object.entries(r.chat||{}).map(([k,v])=>({id:k,...v})).sort((a,b)=>(a.en||0)-(b.en||0));
-  if(!msgs.length) return;
-  const nuevo = msgs[msgs.length-1];
-  if((nuevo.en||0) <= S.ultimoChat) return;
-  S.ultimoChat = nuevo.en||0;
-  if(nuevo.deId && nuevo.deId===sesionId()) return;          // no me flasheo a mí mismo
-  const para = nuevo.para || "todos";
-  let paraMi;
-  if(S.vista==="oido" && nuevo.deId==="oido"){
+  // TODOS los mensajes nuevos, no solo el último: el oído puede mandar dos juntos
+  // ("sonido y video, atentos") y antes solo se miraba el último.
+  const nuevos = Object.entries(r.chat||{}).map(([k,v])=>({id:k,...v}))
+    .filter(m=>(m.en||0) > S.ultimoChat).sort((a,b)=>(a.en||0)-(b.en||0));
+  if(!nuevos.length) return;
+  S.ultimoChat = Math.max(...nuevos.map(m=>m.en||0));
+  const miArea = S.yo ? S.yo.areaId : null;
+  const paraMi = m => {
+    if(m.deId && m.deId===sesionId()) return false;          // no me flasheo a mí mismo
+    const para = m.para || "todos";
     // la pantalla del oído siempre muestra sus propios avisos, sea quien sea el operador
-    paraMi = true;
-  } else if(S.vista==="escenario" || S.vista==="pulpito"){
+    if(S.vista==="oido" && m.deId==="oido") return true;
     // escenario y púlpito: solo si el mensaje es para ellos. Un "Todos" no los distrae.
-    paraMi = para===S.vista;
-  } else if(S.vista==="cabina"){
+    if(S.vista==="escenario" || S.vista==="pulpito") return para===S.vista;
     // la TV de cabina es de todos: solo los mensajes a Todos, aunque el navegador tenga un nombre guardado
-    paraMi = para==="todos";
-  } else {
+    if(S.vista==="cabina") return para==="todos";
     // el resto: lo que va a Todos, o lo que va a MI área. Un mensaje a Sonido no flashea en Video.
-    const miArea = S.yo ? S.yo.areaId : null;   // la TV de cabina no tiene área: solo recibe los de Todos
-    paraMi = para==="todos" || (miArea && para===miArea);
-  }
-  if(!paraMi) return;
-  lanzarFlash(nuevo);
+    return para==="todos" || (miArea && para===miArea);
+  };
+  const mios = nuevos.filter(paraMi);
+  if(!mios.length) return;
+  // si hay uno dirigido a mi área, ese es el que importa; si no, el último a Todos
+  const elegido = mios.filter(m=>m.para && m.para!=="todos").pop() || mios.pop();
+  lanzarFlash(elegido);
 }
 function lanzarFlash(m){
   const f=$("#flash"); const c = area(m.area).color;
@@ -2055,9 +2055,25 @@ function cMsgPantalla(r, destino){
 /* ==========================================================================
    OÍDO — escucha el canal del MD en la compu de sonido y avisa cuando llaman
    ========================================================================== */
-const OIDO_DEF = { deviceId:"", deviceLabel:"", canal:0, umbralDb:-45,
-  palabras:"sonido, audio, operador, técnico, foh", destino:"sonido" };
-function oidoCfg(){ try{ return {...OIDO_DEF, ...JSON.parse(localStorage.getItem("cabina.oido")||"{}")}; }catch(e){ return {...OIDO_DEF}; } }
+// Cada regla: si en la frase aparece alguna de sus palabras, le avisa a su área.
+// Una misma frase puede disparar varias ("sonido y video, atentos").
+const REGLAS_DEF = [
+  { destino:"sonido",     palabras:"sonido, audio, operador, técnico, foh" },
+  { destino:"video",      palabras:"video, cámara, cámaras, transmisión, stream" },
+  { destino:"pantalla",   palabras:"pantalla, letras, proyección, diapositiva" },
+  { destino:"produccion", palabras:"producción, productor" }
+].filter(r=>CFG.areas.find(a=>a.id===r.destino));
+const OIDO_DEF = { deviceId:"", deviceLabel:"", canal:0, umbralDb:-45 };
+function oidoCfg(){
+  let c; try{ c = {...OIDO_DEF, ...JSON.parse(localStorage.getItem("cabina.oido")||"{}")}; }catch(e){ c = {...OIDO_DEF}; }
+  if(!Array.isArray(c.reglas)){
+    // versión anterior: una sola lista de palabras para un solo destino
+    c.reglas = c.palabras ? [{destino:c.destino||"sonido", palabras:c.palabras}].concat(REGLAS_DEF.filter(r=>r.destino!==(c.destino||"sonido")))
+                          : REGLAS_DEF.map(r=>({...r}));
+    delete c.palabras; delete c.destino;
+  }
+  return c;
+}
 function oidoGuardar(c){ try{ localStorage.setItem("cabina.oido", JSON.stringify(c)); }catch(e){} }
 
 // sin tildes, minúsculas, sin signos: "¡Sonido!" y "sonidó" matchean "sonido"
@@ -2073,12 +2089,12 @@ function buscarPalabra(texto, palabras){
 
 const OIDO = {
   activo:false, ctx:null, stream:null, analizadores:[], nCanales:0, rec:null, raf:0,
-  hablando:false, sobreDesde:0, bajoDesde:0, parcial:"", finales:[], disparado:false,
-  ultimoAviso:0, ultimoEnvioTexto:0, latidoTimer:null, error:"", dispositivos:[],
+  hablando:false, sobreDesde:0, bajoDesde:0, parcial:"", finales:[], disparado:{},
+  ultimoAviso:{}, ultimoEnvioTexto:0, latidoTimer:null, error:"", dispositivos:[],
   soportaTrack: true
 };
 // Quién ve el acceso al Oído: el área que recibe los avisos y el productor
-function veOido(){ const c=oidoCfg(); return !!(S.yo && (S.yo.admin || S.yo.areaId===(c.destino||"sonido"))); }
+function veOido(){ const c=oidoCfg(); return !!(S.yo && (S.yo.admin || c.reglas.some(r=>r.destino===S.yo.areaId))); }
 function oidoActivo(r){ return !!(r && r.oido && r.oido.activo && ahora()-(r.oido.latido||0) < 15000); }
 
 function cOidoBanner(r){
@@ -2221,17 +2237,21 @@ function oidoFrase(texto, esFinal){
   // compartir lo que se dice con las consolas (como mucho cada 1,5 s)
   if(esFinal || ahora()-OIDO.ultimoEnvioTexto > 1500){ OIDO.ultimoEnvioTexto=ahora(); oidoPatch({texto: texto.trim().slice(-160), textoEn: ahora()}); }
 
-  const hit = buscarPalabra(texto, c.palabras);
-  if(hit && !OIDO.disparado && ahora()-OIDO.ultimoAviso > 6000){
-    OIDO.disparado = true; OIDO.ultimoAviso = ahora();
-    oidoAvisar(texto.trim(), hit);
-  }
-  if(esFinal) OIDO.disparado = false;   // la próxima frase puede volver a avisar
+  // cada área tiene su propio anti-rebote: una vez por frase y no más de una cada 6 s
+  OIDO.disparado = OIDO.disparado || {}; OIDO.ultimoAviso = OIDO.ultimoAviso || {};
+  c.reglas.forEach(rg => {
+    if(!rg.destino || !rg.palabras) return;
+    const hit = buscarPalabra(texto, rg.palabras);
+    if(hit && !OIDO.disparado[rg.destino] && ahora()-(OIDO.ultimoAviso[rg.destino]||0) > 6000){
+      OIDO.disparado[rg.destino] = true; OIDO.ultimoAviso[rg.destino] = ahora();
+      oidoAvisar(texto.trim(), hit, rg.destino);
+    }
+  });
+  if(esFinal) OIDO.disparado = {};   // la próxima frase puede volver a avisar
 }
 
-function oidoAvisar(texto, palabra){
-  const c = oidoCfg();
-  const msg = { nombre:"MD", area:"oido", deId:"oido", para:c.destino||"sonido", texto, en: ahora(), auto:true, palabra };
+function oidoAvisar(texto, palabra, destino){
+  const msg = { nombre:"MD", area:"oido", deId:"oido", para:destino||"sonido", texto, en: ahora(), auto:true, palabra };
   OIDO.avisos = [{...msg}].concat(OIDO.avisos||[]).slice(0,10);
   if(S.r) Store.chat(S.r.sala, msg);
   else lanzarFlash(msg);   // sin reunión activa, por lo menos avisa en esta pantalla
@@ -2283,7 +2303,8 @@ function vOido(){
       <span class="mv"><i id="mv-${i}"></i><b style="bottom:${Math.max(0,Math.min(100,(c.umbralDb+60)/60*100))}%"></b></span>
     </div>`).join("") : "";
   const avisos = (OIDO.avisos||[]).map(a=>`<div class="linkrow"><span class="mono muted">${hhmm(a.en)}</span>
-      <span class="grow">${esc(a.texto)}</span><span class="chip sig">${esc(a.palabra)}</span></div>`).join("");
+      <span class="grow">${esc(a.texto)}</span><span class="chip sig">${esc(a.palabra)}</span>
+      <span class="chip" style="color:${area(a.para).color}">→ ${esc(area(a.para).nombre)}</span></div>`).join("");
 
   return cTopbar(`<a class="btn sm" href="#/c/${S.sala||CFG.alias}" title="El oído sigue escuchando mientras esta pestaña esté abierta">▦ Volver a la consola</a>`) + `<div class="oido-wrap">
     <div class="oido-estado ${OIDO.activo?'on':''}">
@@ -2314,17 +2335,26 @@ function vOido(){
     ${OIDO.activo?`<div class="card"><div class="phase"><span>Lo que se escucha</span></div>
       <div class="oido-txt" id="oido-txt">${OIDO.finales[0]?esc(OIDO.finales[0].t):""} <span class="parcial">${esc(OIDO.parcial)}</span></div></div>`:""}
 
-    <div class="card" style="padding:14px 16px">
-      <div class="row wrap" style="gap:12px;align-items:flex-end">
-        <label class="f grow" style="min-width:240px"><span>Palabras que disparan el aviso (separadas por coma)</span>
-          <input class="inp" id="oidoPal" value="${esc(c.palabras)}"></label>
-        <label class="f" style="min-width:150px"><span>Avisar a</span>
-          <select class="inp" id="oidoDest">${CFG.areas.map(a=>`<option value="${a.id}" ${a.id===c.destino?"selected":""}>${esc(a.nombre)}</option>`).join("")}</select></label>
-        <label class="f" style="min-width:170px"><span>Sensibilidad (${c.umbralDb} dB)</span>
-          <input type="range" id="oidoUmb" min="-70" max="-15" step="1" value="${c.umbralDb}"></label>
-        <button class="btn" data-act="oidoprueba">Probar aviso</button>
+    <div class="card">
+      <div class="phase"><span>Avisos por área</span>
+        <button class="btn sm" data-act="oidoaddreg">+ Agregar aviso</button></div>
+      ${c.reglas.map((rg,i)=>`<div class="sec" style="grid-template-columns:150px 1fr auto auto;gap:8px">
+        <select class="inp" data-oreg="${i}" data-of="destino">
+          ${CFG.areas.map(a=>`<option value="${a.id}" ${a.id===rg.destino?"selected":""}>${esc(a.nombre)}</option>`).join("")}
+        </select>
+        <input class="inp" data-oreg="${i}" data-of="palabras" value="${esc(rg.palabras)}" placeholder="palabras separadas por coma">
+        <button class="btn sm" data-act="oidoprueba" data-i="${i}" title="Mandar un aviso de prueba a esta área">Probar</button>
+        <button class="btn gh sm danger" data-act="oidodelreg" data-i="${i}" title="Borrar este aviso">✕</button>
+      </div>`).join("") || '<div class="empty" style="padding:14px">Sin avisos. Agregá uno.</div>'}
+      <div class="muted" style="font-size:12.5px;padding:10px 14px 12px">
+        Si en lo que dice el MD aparece alguna de esas palabras, le flashea a esa área. Una frase como «sonido y video, atentos» avisa a las dos.
+        Sumá nombres de operadores. Las tildes y los signos no importan: «sonidó» y «¡Sonido!» cuentan igual.
       </div>
-      <div class="muted" style="font-size:12.5px;margin-top:8px">Sumá tu nombre y el de los otros operadores. Sin tildes no importa: «sonidó» y «¡Sonido!» cuentan igual.</div>
+    </div>
+
+    <div class="card" style="padding:12px 16px">
+      <label class="f" style="max-width:320px"><span>Sensibilidad del indicador de voz (${c.umbralDb} dB)</span>
+        <input type="range" id="oidoUmb" min="-70" max="-15" step="1" value="${c.umbralDb}"></label>
     </div>
 
     <div class="card"><div class="phase"><span>Avisos disparados</span><span class="pc">${(OIDO.avisos||[]).length}</span></div>
@@ -2687,7 +2717,20 @@ document.addEventListener("click", async ev => {
   }
   if(act==="oidostop"){ oidoDetener(); return; }
   if(act==="oidocanal"){ oidoCambiarCanal(+b.dataset.i); return; }
-  if(act==="oidoprueba"){ oidoAvisar("Prueba: sonido, ¿me escuchás?", "prueba"); return; }
+  if(act==="oidoprueba"){
+    const rg = oidoCfg().reglas[+b.dataset.i]; if(!rg) return;
+    oidoAvisar("Prueba del oído para "+area(rg.destino).nombre, "prueba", rg.destino); return;
+  }
+  if(act==="oidoaddreg"){
+    const c=oidoCfg(); const usadas=c.reglas.map(r=>r.destino);
+    const libre = (CFG.areas.find(a=>!usadas.includes(a.id))||CFG.areas[0]).id;
+    c.reglas.push({destino:libre, palabras:""}); oidoGuardar(c); render();
+    setTimeout(()=>{ const ins=document.querySelectorAll('[data-of="palabras"]'); if(ins.length) ins[ins.length-1].focus(); }, 30);
+    return;
+  }
+  if(act==="oidodelreg"){
+    const c=oidoCfg(); c.reglas.splice(+b.dataset.i,1); oidoGuardar(c); render(); return;
+  }
   if(act==="llamar"){
     const r=S.r; if(!r){ toast("No hay reunión activa"); return; }
     const para=b.dataset.para;
@@ -2717,10 +2760,13 @@ document.addEventListener("keydown", ev=>{
 });
 
 document.addEventListener("change", ev=>{
-  const id = ev.target.id; if(!/^oido/.test(id)) return;
+  const el = ev.target;
+  if(el.dataset && el.dataset.oreg!=null){
+    const c = oidoCfg(); const rg = c.reglas[+el.dataset.oreg]; if(!rg) return;
+    rg[el.dataset.of] = el.value; oidoGuardar(c); render(); return;
+  }
+  const id = el.id; if(!/^oido/.test(id)) return;
   const c = oidoCfg();
-  if(id==="oidoPal")  c.palabras = ev.target.value;
-  if(id==="oidoDest") c.destino  = ev.target.value;
   if(id==="oidoUmb")  c.umbralDb = +ev.target.value;
   if(id==="oidoDev"){ c.deviceId = ev.target.value; c.deviceLabel = ev.target.options[ev.target.selectedIndex].text; }
   oidoGuardar(c); render();
