@@ -1872,6 +1872,7 @@ function vConsola(){
       ${oidoActivo(r)?`<span class="chip sig" title="La compu de sonido está escuchando al MD"><span class="dot"></span>oído</span>`:""}
       <div class="grow"></div>
       ${S.yo?`<div class="who"><span class="dot" style="color:${miArea?miArea.color:'var(--ink-3)'}"></span>${esc(S.yo.nombre)} · ${esc(miArea?miArea.nombre:"—")}</div>`:""}
+      ${veOido()?`<a class="btn sm" href="#/oido/${S.sala||r.sala}" title="Escuchar al MD desde esta compu">🎧 Oído</a>`:""}
       <a class="btn gh sm" href="#/${prod?"r":"a"}/${r.sala}" title="Vista para la mano">▤</a>
       ${prod?`<a class="btn gh sm" href="#/">Admin</a>`:""}
       <button class="btn gh sm" data-act="probarflash" title="Probar el flash">✦</button>
@@ -1949,7 +1950,7 @@ function vArea(){
   const p = progreso(míos);
   const cur = r.secActiva!=null ? (r.secciones||[])[r.secActiva] : null;
 
-  return cTopbar(`<a class="btn sm" href="#/c/${r.sala}" title="Vista de monitor grande">▦ Consola</a>`) + cProgreso(r) + `<div class="main">
+  return cTopbar(`${veOido()?`<a class="btn sm" href="#/oido/${S.sala||r.sala}">🎧 Oído</a>`:""}<a class="btn sm" href="#/c/${r.sala}" title="Vista de monitor grande">▦ Consola</a>`) + cProgreso(r) + `<div class="main">
     <div class="two">
       <div class="stack">
         ${cOidoBanner(r)}
@@ -2076,6 +2077,8 @@ const OIDO = {
   ultimoAviso:0, ultimoEnvioTexto:0, latidoTimer:null, error:"", dispositivos:[],
   soportaTrack: true
 };
+// Quién ve el acceso al Oído: el área que recibe los avisos y el productor
+function veOido(){ const c=oidoCfg(); return !!(S.yo && (S.yo.admin || S.yo.areaId===(c.destino||"sonido"))); }
 function oidoActivo(r){ return !!(r && r.oido && r.oido.activo && ahora()-(r.oido.latido||0) < 15000); }
 
 function cOidoBanner(r){
@@ -2282,7 +2285,7 @@ function vOido(){
   const avisos = (OIDO.avisos||[]).map(a=>`<div class="linkrow"><span class="mono muted">${hhmm(a.en)}</span>
       <span class="grow">${esc(a.texto)}</span><span class="chip sig">${esc(a.palabra)}</span></div>`).join("");
 
-  return cTopbar() + `<div class="oido-wrap">
+  return cTopbar(`<a class="btn sm" href="#/c/${S.sala||CFG.alias}" title="El oído sigue escuchando mientras esta pestaña esté abierta">▦ Volver a la consola</a>`) + `<div class="oido-wrap">
     <div class="oido-estado ${OIDO.activo?'on':''}">
       <div class="grow">
         <div class="k">Oído · compu de sonido</div>
