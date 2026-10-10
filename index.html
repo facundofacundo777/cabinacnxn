@@ -418,6 +418,43 @@ table.rep{min-width:640px;border:none}
 table.rep th,table.rep td{padding:9px 12px;font-size:13.5px}
 table.rep td.ok{color:var(--ok)} table.rep td.warn{color:var(--warn)} table.rep td.late{color:var(--late)}
 table.rep td{font-variant-numeric:tabular-nums}
+/* ---------- oído ---------- */
+.oido-banner{
+  display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:var(--r);
+  background:var(--signal-2);border:1px solid var(--signal);color:var(--ink);
+}
+.oido-banner .ob-k{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.14em;color:var(--signal);white-space:nowrap;font-weight:600}
+.oido-banner .ob-t{font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oido-banner .dot{color:var(--signal);animation:parp 1s steps(2,start) infinite}
+.oido-wrap{max-width:980px;margin:0 auto;padding:22px 18px 60px;display:flex;flex-direction:column;gap:14px}
+.oido-estado{display:flex;align-items:center;gap:14px;padding:18px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface)}
+.oido-estado.on{border-color:var(--ok)}
+.oido-estado .big{font-size:clamp(22px,4vw,34px)}
+.meters{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}
+.meter{
+  border:1px solid var(--line-2);border-radius:3px;background:var(--surface);padding:6px 6px 8px;cursor:pointer;
+  display:flex;flex-direction:column;gap:5px;align-items:stretch;text-align:center;
+}
+.meter.on{border-color:var(--signal);background:var(--signal-2)}
+.meter .mk{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-2)}
+.meter .mv{height:70px;background:var(--surface-3);border-radius:2px;position:relative;overflow:hidden}
+.meter .mv i{position:absolute;left:0;right:0;bottom:0;height:0;background:var(--ok)}
+.meter .mv b{position:absolute;left:0;right:0;height:1px;background:var(--warn)}
+.oido-txt{min-height:64px;font-size:clamp(18px,2.6vw,26px);line-height:1.3;padding:14px 16px}
+.oido-txt .parcial{color:var(--ink-3)}
+.llamar-wrap{min-height:100dvh;display:flex;flex-direction:column;gap:14px;padding:18px}
+.llamar-grid{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.llamar-btn{
+  border:2px solid var(--line-2);border-radius:10px;background:var(--surface);color:var(--ink);cursor:pointer;
+  font-family:Archivo;font-weight:700;font-size:clamp(28px,6vw,54px);letter-spacing:.02em;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:140px;
+  -webkit-tap-highlight-color:transparent;
+}
+.llamar-btn small{font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:500;letter-spacing:.1em;color:var(--ink-3)}
+.llamar-btn:active{transform:scale(.98)}
+.llamar-btn.enviado{border-color:var(--ok);background:var(--ok-bg)}
+.llamar-mini{position:fixed;right:14px;bottom:14px;opacity:.55;font-size:13px}
+.llamar-mini:hover{opacity:1}
 .toast{
   position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:150;
   background:var(--ink);color:var(--ground);padding:10px 18px;border-radius:99px;
@@ -616,7 +653,9 @@ const DESTINOS_SALA = [
   { id:"escenario", nombre:"ESCENARIO", color:"#E5AC44" },
   { id:"pulpito",   nombre:"PÚLPITO",   color:"#E8705B" }
 ];
-const area = id => CFG.areas.find(a=>a.id===id) || DESTINOS_SALA.find(a=>a.id===id)
+// Quién puede "hablar" sin ser una persona: el oído que escucha al MD.
+const ORIGENES = [ { id:"oido", nombre:"MD · OÍDO", color:"#4FBDC2" } ];
+const area = id => CFG.areas.find(a=>a.id===id) || DESTINOS_SALA.find(a=>a.id===id) || ORIGENES.find(a=>a.id===id)
                    || {id:id,nombre:(id||"—").toUpperCase(),color:"#888"};
 
 function fmtDur(ms, signo){
@@ -951,6 +990,8 @@ function parseHash(){
   if(p[0]==="c" && p[1]) return {vista:"consola", sala:p[1]};
   if(p[0]==="cartel") return {vista:"cartel"};
   if(p[0]==="reporte" && p[1]) return {vista:"reporte", sala:p[1]};
+  if(p[0]==="oido" && p[1]) return {vista:"oido", sala:p[1]};
+  if(p[0]==="llamar" && p[1]) return {vista:"llamar", sala:p[1]};
   if(p[0]==="a" && p[1]) return {vista:"area", sala:p[1]};
   if(p[0]==="v" && p[1] && p[2]) return {vista:p[2], sala:p[1]};
   return {vista:"admin"};
@@ -1020,7 +1061,7 @@ function ruta(){
    ========================================================================== */
 let flashTimer=null;
 function detectarFlash(antes, r){
-  const vistasConFlash = ["prod","consola","area","cabina","escenario","pulpito","live"];
+  const vistasConFlash = ["prod","consola","area","cabina","escenario","pulpito","live","oido"];
   if(!vistasConFlash.includes(S.vista)) return;
   const msgs = Object.entries(r.chat||{}).map(([k,v])=>({id:k,...v})).sort((a,b)=>(a.en||0)-(b.en||0));
   if(!msgs.length) return;
@@ -1030,7 +1071,10 @@ function detectarFlash(antes, r){
   if(nuevo.deId && nuevo.deId===sesionId()) return;          // no me flasheo a mí mismo
   const para = nuevo.para || "todos";
   let paraMi;
-  if(S.vista==="escenario" || S.vista==="pulpito"){
+  if(S.vista==="oido" && nuevo.deId==="oido"){
+    // la pantalla del oído siempre muestra sus propios avisos, sea quien sea el operador
+    paraMi = true;
+  } else if(S.vista==="escenario" || S.vista==="pulpito"){
     // escenario y púlpito: solo si el mensaje es para ellos. Un "Todos" no los distrae.
     paraMi = para===S.vista;
   } else if(S.vista==="cabina"){
@@ -1556,7 +1600,9 @@ function vLinks(){
     ["Cabina (TV)",        `${base}#/v/${CFG.alias}/cabina`,    "Pantalla de producción."],
     ["Escenario",          `${base}#/v/${CFG.alias}/escenario`, "Monitor de confianza."],
     ["Púlpito",            `${base}#/v/${CFG.alias}/pulpito`,   "El del predicador."],
-    ["Seguimiento",        `${base}#/v/${CFG.alias}/live`,      "Para mirar de afuera."]
+    ["Seguimiento",        `${base}#/v/${CFG.alias}/live`,      "Para mirar de afuera."],
+    ["Oído",               `${base}#/oido/${CFG.alias}`,        "En la compu de sonido conectada a la WING: escucha al MD y avisa cuando llaman a sonido."],
+    ["Llamar",             `${base}#/llamar/${CFG.alias}`,      "Botones grandes para una tablet en el escenario: llama a sonido, video o producción."]
   ];
   const links = [
     ["Consola",     `${base}#/c/${r.sala}`,            "Tres columnas para monitor grande. Sirve para cualquiera del equipo — los botones de control aparecen solo si sos el productor"],
@@ -1607,7 +1653,8 @@ function vCartel(){
     ["Vista simple",       `${base}#/a/${CFG.alias}`, "Lo mismo, más liviano para el celular."],
     ["Cabina",             `${base}#/v/${CFG.alias}/cabina`,    "TV de producción. No pide nombre."],
     ["Escenario",          `${base}#/v/${CFG.alias}/escenario`, "Monitor de confianza. No pide nombre."],
-    ["Púlpito",            `${base}#/v/${CFG.alias}/pulpito`,   "Celular del que predica. No pide nombre."]
+    ["Púlpito",            `${base}#/v/${CFG.alias}/pulpito`,   "Celular del que predica. No pide nombre."],
+    ["Llamar",             `${base}#/llamar/${CFG.alias}`,      "Tablet del escenario: un toque y le avisa a sonido. No pide nombre."]
   ];
   return `<div class="cartel">
     <div class="cartel-top">
@@ -1822,6 +1869,7 @@ function vConsola(){
         <b class="mono" id="tk-consvivo">${enVivo&&r.arrancoEn?fmtDur(ahora()-r.arrancoEn):"--:--"}</b>
       </div>
       <div class="ch-item"><span class="k">Ítem actual</span><b>${cur?esc(cur.titulo):"—"}</b></div>
+      ${oidoActivo(r)?`<span class="chip sig" title="La compu de sonido está escuchando al MD"><span class="dot"></span>oído</span>`:""}
       <div class="grow"></div>
       ${S.yo?`<div class="who"><span class="dot" style="color:${miArea?miArea.color:'var(--ink-3)'}"></span>${esc(S.yo.nombre)} · ${esc(miArea?miArea.nombre:"—")}</div>`:""}
       <a class="btn gh sm" href="#/${prod?"r":"a"}/${r.sala}" title="Vista para la mano">▤</a>
@@ -1880,6 +1928,7 @@ function vConsola(){
       </div>
 
       <div class="cons-col">
+        ${cOidoBanner(r)}
         ${cSecciones(r,{control:prod})}
         ${cTabs(r)}
         ${cChecklist(r, S.tab, filtroMio()&&S.yo ? {area:S.yo.areaId} : {})}
@@ -1903,6 +1952,7 @@ function vArea(){
   return cTopbar(`<a class="btn sm" href="#/c/${r.sala}" title="Vista de monitor grande">▦ Consola</a>`) + cProgreso(r) + `<div class="main">
     <div class="two">
       <div class="stack">
+        ${cOidoBanner(r)}
         <div class="card" style="padding:15px 16px">
           <div class="row" style="gap:8px">
             <span class="dot" style="color:${a.color}"></span>
@@ -2001,6 +2051,306 @@ function cMsgPantalla(r, destino){
     <div class="tv-lbl" style="margin-bottom:6px">${esc(m.nombre)} · ${hhmm(m.en)}</div>${esc(m.texto)}</div>`;
 }
 
+/* ==========================================================================
+   OÍDO — escucha el canal del MD en la compu de sonido y avisa cuando llaman
+   ========================================================================== */
+const OIDO_DEF = { deviceId:"", deviceLabel:"", canal:0, umbralDb:-45,
+  palabras:"sonido, audio, operador, técnico, foh", destino:"sonido" };
+function oidoCfg(){ try{ return {...OIDO_DEF, ...JSON.parse(localStorage.getItem("cabina.oido")||"{}")}; }catch(e){ return {...OIDO_DEF}; } }
+function oidoGuardar(c){ try{ localStorage.setItem("cabina.oido", JSON.stringify(c)); }catch(e){} }
+
+// sin tildes, minúsculas, sin signos: "¡Sonido!" y "sonidó" matchean "sonido"
+function normalizar(t){
+  return String(t||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .replace(/[^a-z0-9ñ ]+/g," ").replace(/\s+/g," ").trim();
+}
+function buscarPalabra(texto, palabras){
+  const t = " "+normalizar(texto)+" ";
+  const lista = String(palabras||"").split(",").map(normalizar).filter(Boolean);
+  return lista.find(p => t.includes(" "+p+" ")) || null;
+}
+
+const OIDO = {
+  activo:false, ctx:null, stream:null, analizadores:[], nCanales:0, rec:null, raf:0,
+  hablando:false, sobreDesde:0, bajoDesde:0, parcial:"", finales:[], disparado:false,
+  ultimoAviso:0, ultimoEnvioTexto:0, latidoTimer:null, error:"", dispositivos:[],
+  soportaTrack: true
+};
+function oidoActivo(r){ return !!(r && r.oido && r.oido.activo && ahora()-(r.oido.latido||0) < 15000); }
+
+function cOidoBanner(r){
+  if(!oidoActivo(r)) return "";
+  const conTexto = r.oido.textoEn && ahora()-r.oido.textoEn < 5000;
+  if(!r.oido.hablando && !conTexto) return "";
+  return `<div class="oido-banner"><span class="dot"></span><span class="ob-k">EL MD ESTÁ HABLANDO</span>
+    <span class="ob-t">${esc(r.oido.texto||"…")}</span></div>`;
+}
+
+function oidoPatch(obj){
+  const r=S.r; if(!r) return;
+  const p={}; Object.keys(obj).forEach(k=>p["oido/"+k]=obj[k]);
+  Store.patch(r.sala, p);
+}
+
+async function oidoListarDispositivos(){
+  try{
+    const ds = await navigator.mediaDevices.enumerateDevices();
+    OIDO.dispositivos = ds.filter(d=>d.kind==="audioinput");
+  }catch(e){ OIDO.dispositivos=[]; }
+  render();
+}
+
+async function oidoIniciar(){
+  const c = oidoCfg();
+  OIDO.error="";
+  try{
+    OIDO.stream = await navigator.mediaDevices.getUserMedia({ audio:{
+      deviceId: c.deviceId ? {exact:c.deviceId} : undefined,
+      channelCount: {ideal: 64},
+      echoCancellation:false, noiseSuppression:false, autoGainControl:false
+    }});
+  }catch(e){
+    OIDO.error = /NotAllowed|Permission/i.test(e.name||"") ? "Chrome no tiene permiso para usar el micrófono. Tocá el candado de la barra de direcciones y permitilo."
+               : /NotFound|Overconstrained/i.test(e.name||"") ? "No encuentro esa interfaz de audio. ¿Está conectada la WING? Elegila de nuevo en la lista."
+               : "No pude abrir la entrada de audio.";
+    render(); return;
+  }
+  await oidoListarDispositivos();   // con permiso ya aparecen los nombres
+  const track = OIDO.stream.getAudioTracks()[0];
+  const st = track.getSettings ? track.getSettings() : {};
+  if(st.deviceId && st.deviceId!==c.deviceId){ c.deviceId=st.deviceId; }
+  c.deviceLabel = track.label || c.deviceLabel; oidoGuardar(c);
+  track.onended = ()=>{ OIDO.error="Se desconectó la interfaz de audio."; oidoDetener(true); };
+
+  OIDO.ctx = new (window.AudioContext||window.webkitAudioContext)();
+  try{ await OIDO.ctx.resume(); }catch(e){}
+  const src = OIDO.ctx.createMediaStreamSource(OIDO.stream);
+  const n = Math.max(1, st.channelCount || src.channelCount || 1);
+  OIDO.nCanales = n;
+  const split = OIDO.ctx.createChannelSplitter(n);
+  src.connect(split);
+  OIDO.analizadores = [];
+  for(let i=0;i<n;i++){
+    const an = OIDO.ctx.createAnalyser(); an.fftSize = 1024;
+    split.connect(an, i);
+    OIDO.analizadores.push(an);
+  }
+  if(c.canal >= n){ c.canal = 0; oidoGuardar(c); }
+  // el canal elegido va solo al reconocedor de voz
+  OIDO.split = split;
+  OIDO.destino = OIDO.ctx.createMediaStreamDestination();
+  OIDO.ganancia = OIDO.ctx.createGain();
+  OIDO.ganancia.connect(OIDO.destino);
+  split.connect(OIDO.ganancia, c.canal);
+
+  OIDO.activo = true;
+  oidoReconocer();
+  OIDO.raf = requestAnimationFrame(oidoMedir);
+  oidoPatch({activo:true, latido:ahora(), hablando:false, texto:"", operador: S.yo?S.yo.nombre:""});
+  clearInterval(OIDO.latidoTimer);
+  OIDO.latidoTimer = setInterval(()=>oidoPatch({latido:ahora()}), 5000);
+  render();
+}
+
+function oidoCambiarCanal(i){
+  const c=oidoCfg(); c.canal=i; oidoGuardar(c);
+  if(OIDO.activo && OIDO.split){
+    try{ OIDO.split.disconnect(OIDO.ganancia); }catch(e){}
+    // reconectar todas las salidas a sus analizadores y la elegida a la ganancia
+    try{ OIDO.split.disconnect(); }catch(e){}
+    OIDO.analizadores.forEach((an,k)=>OIDO.split.connect(an,k));
+    OIDO.split.connect(OIDO.ganancia, i);
+  }
+  render();
+}
+
+function oidoReconocer(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){ OIDO.error = "Este navegador no tiene reconocimiento de voz. Abrí esta pestaña en Google Chrome."; render(); return; }
+  const rec = new SR();
+  rec.lang = "es-AR"; rec.continuous = true; rec.interimResults = true;
+  rec.onresult = ev => {
+    if(OIDO.fallos || OIDO.error){ OIDO.fallos=0; if(OIDO.error){ OIDO.error=""; render(); } }   // volvió a andar
+    let parcial="", final="";
+    for(let k=ev.resultIndex;k<ev.results.length;k++){
+      const t = ev.results[k][0].transcript;
+      if(ev.results[k].isFinal) final += t; else parcial += t;
+    }
+    if(final) oidoFrase(final, true);
+    if(parcial) oidoFrase(parcial, false);
+  };
+  rec.onresult_ok = false;
+  rec.onerror = e => {
+    if(e.error==="no-speech" || e.error==="aborted") return;
+    const msg = e.error==="network" ? "Sin internet: el reconocimiento de voz de Chrome necesita conexión. Reintenta solo."
+              : e.error==="not-allowed" ? "Chrome no tiene permiso para usar el micrófono."
+              : e.error==="audio-capture" ? "No llega audio de la interfaz."
+              : "El reconocimiento de voz se cortó. Se vuelve a conectar solo.";
+    OIDO.fallos = (OIDO.fallos||0) + 1;
+    if(msg!==OIDO.error){ OIDO.error = msg; render(); }   // solo re-dibuja si cambió el mensaje
+  };
+  // Chrome corta el reconocimiento cada tanto: si seguimos escuchando, lo relanzamos.
+  // Si viene fallando (sin internet), espera cada vez más: 0,3 s → hasta 15 s.
+  rec.onend = () => {
+    if(!OIDO.activo) return;
+    const espera = OIDO.fallos ? Math.min(15000, 1000*Math.pow(2, OIDO.fallos-1)) : 300;
+    setTimeout(()=>{ if(OIDO.activo) oidoArrancarRec(rec); }, espera);
+  };
+  OIDO.rec = rec;
+  oidoArrancarRec(rec);
+}
+function oidoArrancarRec(rec){
+  const track = OIDO.destino && OIDO.destino.stream.getAudioTracks()[0];
+  try{ rec.start(track); OIDO.soportaTrack = true; }
+  catch(e){
+    // Chrome viejo: no acepta un canal específico, escucha la entrada predeterminada de la Mac
+    try{ rec.start(); OIDO.soportaTrack = false; render(); }catch(_){}
+  }
+}
+
+// Llega texto (parcial o final). Muestra, y si aparece una palabra clave, avisa UNA vez por frase.
+function oidoFrase(texto, esFinal){
+  const c = oidoCfg();
+  if(esFinal){ OIDO.finales.unshift({t:texto.trim(), en:ahora()}); OIDO.finales=OIDO.finales.slice(0,8); OIDO.parcial=""; }
+  else OIDO.parcial = texto;
+  const el = document.getElementById("oido-txt");
+  if(el) el.innerHTML = (OIDO.finales[0]?esc(OIDO.finales[0].t)+" ":"") + `<span class="parcial">${esc(OIDO.parcial)}</span>`;
+  // compartir lo que se dice con las consolas (como mucho cada 1,5 s)
+  if(esFinal || ahora()-OIDO.ultimoEnvioTexto > 1500){ OIDO.ultimoEnvioTexto=ahora(); oidoPatch({texto: texto.trim().slice(-160), textoEn: ahora()}); }
+
+  const hit = buscarPalabra(texto, c.palabras);
+  if(hit && !OIDO.disparado && ahora()-OIDO.ultimoAviso > 6000){
+    OIDO.disparado = true; OIDO.ultimoAviso = ahora();
+    oidoAvisar(texto.trim(), hit);
+  }
+  if(esFinal) OIDO.disparado = false;   // la próxima frase puede volver a avisar
+}
+
+function oidoAvisar(texto, palabra){
+  const c = oidoCfg();
+  const msg = { nombre:"MD", area:"oido", deId:"oido", para:c.destino||"sonido", texto, en: ahora(), auto:true, palabra };
+  OIDO.avisos = [{...msg}].concat(OIDO.avisos||[]).slice(0,10);
+  if(S.r) Store.chat(S.r.sala, msg);
+  else lanzarFlash(msg);   // sin reunión activa, por lo menos avisa en esta pantalla
+  render();
+}
+
+function oidoMedir(){
+  if(!OIDO.activo) return;
+  const c = oidoCfg(); const buf = new Float32Array(1024);
+  OIDO.analizadores.forEach((an,i)=>{
+    an.getFloatTimeDomainData(buf);
+    let sum=0; for(let k=0;k<buf.length;k++) sum+=buf[k]*buf[k];
+    const rms = Math.sqrt(sum/buf.length); const db = rms>0 ? 20*Math.log10(rms) : -100;
+    const pct = Math.max(0, Math.min(100, (db+60)/60*100));
+    const bar = document.getElementById("mv-"+i); if(bar) bar.style.height = pct+"%";
+    if(i===c.canal){
+      const n=ahora();
+      if(db > c.umbralDb){ OIDO.bajoDesde=0; if(!OIDO.sobreDesde) OIDO.sobreDesde=n;
+        if(!OIDO.hablando && n-OIDO.sobreDesde>250){ OIDO.hablando=true; oidoPatch({hablando:true}); oidoPintarEstado(); } }
+      else { OIDO.sobreDesde=0; if(!OIDO.bajoDesde) OIDO.bajoDesde=n;
+        if(OIDO.hablando && n-OIDO.bajoDesde>1500){ OIDO.hablando=false; oidoPatch({hablando:false}); oidoPintarEstado(); } }
+    }
+  });
+  OIDO.raf = requestAnimationFrame(oidoMedir);
+}
+function oidoPintarEstado(){
+  const e=document.getElementById("oido-voz"); if(e) e.textContent = OIDO.hablando ? "● hay voz en el canal" : "silencio";
+}
+
+function oidoDetener(porError){
+  OIDO.activo=false;
+  cancelAnimationFrame(OIDO.raf); clearInterval(OIDO.latidoTimer);
+  try{ OIDO.rec && OIDO.rec.abort(); }catch(e){}
+  try{ OIDO.stream && OIDO.stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  try{ OIDO.ctx && OIDO.ctx.close(); }catch(e){}
+  OIDO.rec=null; OIDO.stream=null; OIDO.ctx=null; OIDO.analizadores=[]; OIDO.hablando=false;
+  oidoPatch({activo:false, hablando:false});
+  render();
+}
+
+function vOido(){
+  const c = oidoCfg(); const r = S.r;
+  const opciones = OIDO.dispositivos.length
+    ? OIDO.dispositivos.map(d=>`<option value="${esc(d.deviceId)}" ${d.deviceId===c.deviceId?"selected":""}>${esc(d.label||"Entrada sin nombre (falta permiso)")}</option>`).join("")
+    : `<option value="">${c.deviceLabel?esc(c.deviceLabel):"Tocá «Buscar interfaces»"}</option>`;
+  const meters = OIDO.activo ? Array.from({length:OIDO.nCanales},(_,i)=>`
+    <div class="meter ${i===c.canal?'on':''}" data-act="oidocanal" data-i="${i}" title="Usar este canal">
+      <span class="mk">${i+1}</span>
+      <span class="mv"><i id="mv-${i}"></i><b style="bottom:${Math.max(0,Math.min(100,(c.umbralDb+60)/60*100))}%"></b></span>
+    </div>`).join("") : "";
+  const avisos = (OIDO.avisos||[]).map(a=>`<div class="linkrow"><span class="mono muted">${hhmm(a.en)}</span>
+      <span class="grow">${esc(a.texto)}</span><span class="chip sig">${esc(a.palabra)}</span></div>`).join("");
+
+  return cTopbar() + `<div class="oido-wrap">
+    <div class="oido-estado ${OIDO.activo?'on':''}">
+      <div class="grow">
+        <div class="k">Oído · compu de sonido</div>
+        <div class="big" style="color:var(--${OIDO.activo?'ok':'ink-2'})">${OIDO.activo?"ESCUCHANDO AL MD":"Apagado"}</div>
+        <div class="muted" style="font-size:13px">${OIDO.activo?`Canal ${c.canal+1} de ${OIDO.nCanales} · <span id="oido-voz">${OIDO.hablando?"● hay voz en el canal":"silencio"}</span>`:"Elegí la interfaz y tocá Escuchar."}
+          ${r?"":" · <b>No hay reunión activa</b>: avisa solo en esta pantalla."}</div>
+      </div>
+      ${OIDO.activo
+        ? `<button class="btn lg danger" data-act="oidostop">Dejar de escuchar</button>`
+        : `<button class="btn lg pri" data-act="oidostart">Escuchar</button>`}
+    </div>
+    ${OIDO.error?`<div class="warnbox">${esc(OIDO.error)}</div>`:""}
+    ${OIDO.activo && !OIDO.soportaTrack?`<div class="warnbox">Tu Chrome no deja elegir el canal para el reconocimiento de voz: está escuchando la entrada predeterminada de la Mac. Actualizá Chrome, o poné la WING como entrada en Ajustes → Sonido.</div>`:""}
+
+    <div class="card" style="padding:14px 16px">
+      <div class="row wrap" style="gap:10px;align-items:flex-end">
+        <label class="f grow" style="min-width:220px"><span>Interfaz de audio</span>
+          <select class="inp" id="oidoDev" ${OIDO.activo?"disabled":""}>${opciones}</select></label>
+        <button class="btn" data-act="oidobuscar" ${OIDO.activo?"disabled":""}>Buscar interfaces</button>
+      </div>
+      ${OIDO.activo?`<div class="k" style="margin:14px 0 6px">Canal del MD — pedile que hable y tocá el que se mueve</div>
+        <div class="meters">${meters}</div>
+        ${OIDO.nCanales<=2?`<div class="muted" style="font-size:12.5px;margin-top:8px">Chrome está viendo ${OIDO.nCanales} canal${OIDO.nCanales>1?"es":""}. Si el MD no aparece, mandalo a la salida USB 1 o 2 desde el ruteo de la WING.</div>`:""}`:""}
+    </div>
+
+    ${OIDO.activo?`<div class="card"><div class="phase"><span>Lo que se escucha</span></div>
+      <div class="oido-txt" id="oido-txt">${OIDO.finales[0]?esc(OIDO.finales[0].t):""} <span class="parcial">${esc(OIDO.parcial)}</span></div></div>`:""}
+
+    <div class="card" style="padding:14px 16px">
+      <div class="row wrap" style="gap:12px;align-items:flex-end">
+        <label class="f grow" style="min-width:240px"><span>Palabras que disparan el aviso (separadas por coma)</span>
+          <input class="inp" id="oidoPal" value="${esc(c.palabras)}"></label>
+        <label class="f" style="min-width:150px"><span>Avisar a</span>
+          <select class="inp" id="oidoDest">${CFG.areas.map(a=>`<option value="${a.id}" ${a.id===c.destino?"selected":""}>${esc(a.nombre)}</option>`).join("")}</select></label>
+        <label class="f" style="min-width:170px"><span>Sensibilidad (${c.umbralDb} dB)</span>
+          <input type="range" id="oidoUmb" min="-70" max="-15" step="1" value="${c.umbralDb}"></label>
+        <button class="btn" data-act="oidoprueba">Probar aviso</button>
+      </div>
+      <div class="muted" style="font-size:12.5px;margin-top:8px">Sumá tu nombre y el de los otros operadores. Sin tildes no importa: «sonidó» y «¡Sonido!» cuentan igual.</div>
+    </div>
+
+    <div class="card"><div class="phase"><span>Avisos disparados</span><span class="pc">${(OIDO.avisos||[]).length}</span></div>
+      ${avisos || '<div class="empty" style="padding:16px">Todavía ninguno.</div>'}</div>
+
+    <div class="muted" style="font-size:12.5px;max-width:70ch">Usa el reconocimiento de voz de Chrome: necesita internet y el audio se procesa en los servidores de Google. No se graba nada. Dejá esta pestaña abierta durante la reunión; podés tener Ableton y la consola abiertos al mismo tiempo.</div>
+  </div>`;
+}
+
+/* ==========================================================================
+   LLAMAR — botones grandes para el escenario
+   ========================================================================== */
+const LLAMADOS = {};   // para → momento del último llamado
+function vLlamar(){
+  const r = S.r;
+  const opciones = [["sonido","SONIDO"],["video","VIDEO"],["pantalla","PANTALLA"],["produccion","PRODUCCIÓN"]]
+    .filter(([id])=>CFG.areas.find(a=>a.id===id));
+  return `<div class="llamar-wrap">
+    <div class="row"><div class="brand">CABINA <em>CNXN</em></div><div class="grow"></div>
+      <span class="k">${r?esc(r.titulo):"sin reunión activa"}</span></div>
+    ${r?"":`<div class="warnbox">No hay una reunión activa: los llamados no van a llegar.</div>`}
+    <div class="llamar-grid">
+      ${opciones.map(([id,n])=>{ const ok = LLAMADOS[id] && Date.now()-LLAMADOS[id] < 3000;
+        return `<button class="llamar-btn ${ok?'enviado':''}" data-act="llamar" data-para="${id}" style="border-color:${ok?'var(--ok)':area(id).color}">
+        ${n}<small>${ok?"✓ avisado":"tocá para llamar"}</small></button>`; }).join("")}
+    </div>
+  </div>`;
+}
+
 function vEscenario(){
   const r=S.r;
   if(!r) return '<div class="center"><div class="empty">'+(S.sala===CFG.alias?'Todavía no hay una reunión activa.':'Esta reunión no existe.')+'</div></div>';
@@ -2019,6 +2369,7 @@ function vEscenario(){
     ${next?`<div class="tv-next" style="justify-content:center"><span class="tv-lbl">Sigue</span><b>${esc(next.titulo)}</b></div>`:""}
     ${r.avisoPulpito?`<div class="tv-msg">${esc(r.avisoPulpito.texto)}</div>`:""}
     ${cMsgPantalla(r,"escenario")}
+    <button class="btn llamar-mini" data-act="llamar" data-para="sonido">📣 Llamar a sonido</button>
     <div class="tv-clock" style="text-align:center" id="tk-reloj2">${hhmm(ahora())}</div>
   </div>`;
 }
@@ -2070,9 +2421,9 @@ function render(){
 function renderAhora(){
   const app=$("#app");
   const v=S.vista;
-  const pantallas = ["cabina","escenario","pulpito","cartel"];
+  const pantallas = ["cabina","escenario","pulpito","cartel","llamar"];
   document.documentElement.setAttribute("data-screen",
-    (pantallas.includes(v) && v!=="cartel") ? "tv" : "app");
+    (pantallas.includes(v) && v!=="cartel") || v==="oido" ? "tv" : "app");
 
   // las pantallas de sala no piden identidad
   if(!pantallas.includes(v) && !S.yo){ app.innerHTML = vIdentidad(); return; }
@@ -2084,6 +2435,8 @@ function renderAhora(){
   else if(v==="consola")   html = vConsola();
   else if(v==="cartel")    html = vCartel();
   else if(v==="reporte")   html = vReporte();
+  else if(v==="oido")      html = vOido();
+  else if(v==="llamar")    html = vLlamar();
   else if(v==="area")      html = vArea();
   else if(v==="live")      html = vLive();
   else if(v==="cabina")    html = vCabina();
@@ -2320,6 +2673,29 @@ document.addEventListener("click", async ev => {
     p[`secciones/${i}/arrancoEn`]=ahora(); p["secActiva"]=i;
     await Store.patch(r.sala,p); return;
   }
+  if(act==="oidobuscar"){
+    try{ const st = await navigator.mediaDevices.getUserMedia({audio:true}); st.getTracks().forEach(t=>t.stop()); }catch(e){}
+    oidoListarDispositivos(); return;
+  }
+  if(act==="oidostart"){
+    const sel=$("#oidoDev"); const c=oidoCfg();
+    if(sel && sel.value){ c.deviceId=sel.value; c.deviceLabel=sel.options[sel.selectedIndex].text; oidoGuardar(c); }
+    oidoIniciar(); return;
+  }
+  if(act==="oidostop"){ oidoDetener(); return; }
+  if(act==="oidocanal"){ oidoCambiarCanal(+b.dataset.i); return; }
+  if(act==="oidoprueba"){ oidoAvisar("Prueba: sonido, ¿me escuchás?", "prueba"); return; }
+  if(act==="llamar"){
+    const r=S.r; if(!r){ toast("No hay reunión activa"); return; }
+    const para=b.dataset.para;
+    if(LLAMADOS[para] && Date.now()-LLAMADOS[para]<4000) return;   // evita llamados repetidos por doble toque
+    LLAMADOS[para]=Date.now();
+    Store.chat(r.sala, { nombre:"Escenario", area:"escenario", deId:"llamar-"+sesionId(), para,
+      texto:"¡Te llaman desde el escenario!", en: ahora(), auto:true });
+    render(); setTimeout(render, 3100);
+    if(!b.classList.contains("llamar-btn")) toast("Avisado a "+area(para).nombre);
+    return;
+  }
   if(act==="probarflash"){
     lanzarFlash({nombre:"Prueba", area:(S.yo?S.yo.areaId:"produccion"), para:"todos", texto:"Así se ve un mensaje"});
     return;
@@ -2335,6 +2711,16 @@ document.addEventListener("keydown", ev=>{
     A.enviar(ev.target.value, destinoDe(S.canal)); ev.target.value=""; S.borrador=""; ev.preventDefault();
   }
   if(ev.key==="Enter" && ev.target.id==="inNombre"){ const b=document.querySelector('[data-act="entrar"]'); if(b) b.click(); }
+});
+
+document.addEventListener("change", ev=>{
+  const id = ev.target.id; if(!/^oido/.test(id)) return;
+  const c = oidoCfg();
+  if(id==="oidoPal")  c.palabras = ev.target.value;
+  if(id==="oidoDest") c.destino  = ev.target.value;
+  if(id==="oidoUmb")  c.umbralDb = +ev.target.value;
+  if(id==="oidoDev"){ c.deviceId = ev.target.value; c.deviceLabel = ev.target.options[ev.target.selectedIndex].text; }
+  oidoGuardar(c); render();
 });
 
 // edición en vivo de campos del admin
@@ -2380,7 +2766,7 @@ let _wake=null;
 async function pedirWakeLock(){
   try{
     if(!("wakeLock" in navigator)) return;
-    if(!["cabina","escenario","pulpito"].includes(parseHash().vista)) return;
+    if(!["cabina","escenario","pulpito","oido","llamar"].includes(parseHash().vista)) return;
     if(_wake && !_wake.released) return;
     _wake = await navigator.wakeLock.request("screen");
   }catch(e){}
